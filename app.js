@@ -102,15 +102,48 @@ function constraintToSPARQLQuery(res, constraintUri, subject, predicate, object)
   `
 }
 
-function filterToSPARQLQuery(filterUri, requireAll, constraints) {
+async function filterToSPARQLQuery(filterUri, requireAll, email, constraints) {
+  const userURIQuery = await querySudo(`
+    PREFIX schema: <http://schema.org/>
+
+    SELECT ?user WHERE {
+      GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+        ?user a schema:Person;
+              schema:email "${email}".
+      }
+    }
+  `);
+
+  const userURIBindings = userURIQuery.results.bindings;
+
+  let userURI;
+  if (userURIBindings.length === 0) {
+    userURI = `http://lokaalbeslist.be/subscriptions/users/${uuid()}`;
+    await updateSudo(`
+      PREFIX schema: <http://schema.org/>
+
+      INSERT {
+        GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+          <${userURI}> a schema:Person;
+                schema:email "${email}".
+        }
+      } WHERE {}
+    `)
+  } else {
+    console.log(userURIBindings[0])
+    userURI = userURIBindings[0].user.value;
+  }
+
   const constraintURIs = constraints.map((constraint) => `<http://lokaalbeslist.be/subscriptions/constraints/${constraint.id}>`);
   return `
   PREFIX sh: <http://www.w3.org/ns/shacl#>
   PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+  PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
   PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
   INSERT {
     GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+      <${userURI}> ext:hasSubscription <${filterUri}>.
       <${filterUri}> a sh:NodeShape;
                      sh:targetClass besluit:Agendapunt;
                      ${requireAll ? 'sh:and' : 'sh:or'} ${createListQuery(constraintURIs)}.
@@ -196,7 +229,7 @@ app.post('/subscription-filters', async (req, res) => {
     req,
     res,
     'subscription-filters',
-    ['require-all'],
+    ['require-all', 'email'],
     ['constraints']
   )) {
     return;
@@ -223,9 +256,10 @@ app.post('/subscription-filters', async (req, res) => {
     return
   }
 
-  const sparqlQuery = filterToSPARQLQuery(
+  const sparqlQuery = await filterToSPARQLQuery(
     filterUri,
     attributes['require-all'],
+    attributes['email'],
     relationships.constraints.data,
   )
 
