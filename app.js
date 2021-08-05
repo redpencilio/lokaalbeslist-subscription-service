@@ -1,13 +1,6 @@
-import { app, errorHandler, uuid, update } from 'mu';
+import { app, errorHandler, uuid } from 'mu';
+import { updateSudo } from '@lblod/mu-auth-sudo';
 import { json } from 'express';
-
-const subjectMapping = {
-  'title': 'terms:title',
-  'description': 'terms:description',
-  'sessionLocation': '(ext:zitting prov:atLocation)',
-  'sessionDate': '(ext:zitting prov:startedAtTime)', //TODO: add besluit:geplandeStart TODO: remove ext:zitting, but not sure how
-  'governanceArea': '(ext:zitting besluit:isGehoudenDoor besluit:bestuurt skos:prefLabel)',
-}
 
 app.use(json())
 
@@ -21,38 +14,75 @@ function error(res, message, statusCode=400) {
   }));
 }
 
-function constraintToSPARQLQuery(res, subject, predicate, object) {
-  const newSubject = subjectMapping[subject];
+function listURI() {
+  return `http://lokaalbeslist.be/subscription/list/${uuid()}/`;
+}
+
+function createListQuery(items) {
+  let currentNode = listURI();
+
+  let ret = `<${currentNode}>.\n`;
+
+  for (let i = 0; i < items.length - 1; i++) {
+    let nextNode = listURI();
+    ret += `<${currentNode}> rdf:first ${items[i]};
+    rdf:rest <${nextNode}>.
+    `
+
+    currentNode = nextNode;
+  }
+
+  ret += `<${currentNode}> rdf:first ${items[items.length-1]};
+  rdf:rest rdf:nil`
+
+  return ret;
+}
+
+function mapSubject(subject) {
+  switch (subject) {
+    case 'title':
+      return 'terms:title';
+    case 'description':
+      return 'terms:description';
+    //TODO: remove ext
+    case 'sessionLocation':
+      return createListQuery(["ext:zitting", "prov:atLocation"]);
+    case 'sessionDate':
+      return createListQuery(["ext:zitting", "prov:startedAtTime"]); // TODO: add besluit:geplandeStart
+    case 'governanceArea':
+      return createListQuery(["ext:zitting",  "besluit:isGehoudenDoor", "besluit:bestuurt", "skos:prefLabel" ])
+  }
+}
+
+function mapPredicateObject(predicate, object) {
+  //TODO: Date predicates
+  switch (predicate) {
+    case 'textEquals':
+    case 'governanceAreaEquals':
+      return `sh:pattern "^${object}$"; sh:flags "i"`;
+    case 'textContains':
+      return `sh:pattern "${object}"; sh:flags "i"`;
+    case 'exists':
+      return 'sh:minCount 1';
+    case 'notExists':
+      return 'sh:maxCount 0';
+  }
+}
+
+function constraintToSPARQLQuery(res, constraintUri, subject, predicate, object) {
+  const newSubject = mapSubject(subject);
 
   if (newSubject === undefined) {
     error(res, `Invalid subject: ${subject}`);
     return undefined;
   }
 
-  let shaclConstraint;
-  //TODO: Date predicates
-  switch (predicate) {
-    case 'textEquals':
-    case 'governanceAreaEquals':
-      shaclConstraint = `sh:pattern "^${object}$";\nsh:flags "i"`;
-      break;
-    case 'textContains':
-      shaclConstraint = `sh:pattern "${object}";\nsh:flags "i"`;
-      break;
-    case 'exists':
-      shaclConstraint = 'sh:minCount 1';
-      break;
-    case 'notExists':
-      shaclConstraint = 'sh:maxCount 0';
-      break;
-  }
+  const shaclConstraint = mapPredicateObject(predicate, object);
 
   if (shaclConstraint === undefined) {
     error(res, `Invalid predicate: ${predicate}`);
     return undefined;
   }
-
-  const constraintUri = `http://lokaalbeslist.be/subscription/constraints/${uuid()}`
 
   return `
   PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
@@ -61,11 +91,12 @@ function constraintToSPARQLQuery(res, subject, predicate, object) {
   PREFIX terms: <http://purl.org/dc/terms/>
   PREFIX sh: <http://www.w3.org/ns/shacl#>
   PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+  PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
   INSERT {
     GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-      <${constraintUri}> sh:path ${newSubject};
-                         ${shaclConstraint}.
+      <${constraintUri}> sh:path ${newSubject}.
+      <${constraintUri}> ${shaclConstraint}.
     }
   } WHERE {}
   `
@@ -118,8 +149,12 @@ app.post('/subscription-filter-constraints', (req, res) => {
 
   const attributes = req.body.data.attributes;
 
+  const resourceId = uuid();
+  const constraintUri = `http://lokaalbeslist.be/subscription/constraints/${resourceId}`
+
   const sparqlQuery = constraintToSPARQLQuery(
     res,
+    constraintUri,
     attributes['subject'],
     attributes['predicate'],
     attributes['object']
@@ -129,10 +164,21 @@ app.post('/subscription-filter-constraints', (req, res) => {
     return;
   }
 
-  update(sparqlQuery).then((result) => {
-    res.send(sparqlQuery + "\n\n\n" + result);
+  updateSudo(sparqlQuery).then(() => {
+    res.status(201).set("Location", constraintUri).send(JSON.stringify({
+      "data": {
+        "type": "subscription-filter-constraints",
+        "id": resourceId,
+        "attributes": {
+          "subject": attributes.subject,
+          "predicate": attributes.predicate,
+          "object": attributes.object,
+        }
+      }
+    }));
+  }).catch(() => {
+    error(res, "Could not execute SPARQL query " + sparqlQuery, 500);
   });
-
 });
 
 app.use(errorHandler);
