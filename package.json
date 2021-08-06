@@ -2,7 +2,10 @@
   "name": "lokaalbeslist-subscription-service",
   "description": "Microservice to allow the [LokaalBeslist.be frontend][frontend] to communicate with the [subscription service][subscription-service].",
   "version": "1.0.0",
-  "devDependencies": {},
+  "devDependencies": {
+    "eslint": "^7.32.0",
+    "eslint-plugin-jsdoc": "^36.0.6"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
