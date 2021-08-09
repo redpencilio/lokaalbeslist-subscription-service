@@ -8,6 +8,24 @@ import { error, verifyConstraint } from './helpers';
  */
 
 /**
+ * @typedef {object} SubscriptionFilterConstraint
+ * @property {string} id - The id of the constraint.
+ * @property {string} subject - The subject of the constraint.
+ * @property {string} predicate - The predicate of the constraint.
+ * @property {string} object - The object of the constraint.
+ */
+
+/**
+ * @typedef {object} SubscriptionFilter
+ * @property {string} id - The id of the filter.
+ * @property {string} email - The email this subscription filter is for.
+ * @property {boolean} requireAll - Require all the constraints to be met if
+ * true, only one if false.
+ * @property {SubscriptionFilterConstraint[]} constraints - The
+ * constraints for this filter either as objects or as their IDs.
+ */
+
+/**
  * Map a frontend-subject onto a (list of) SPARQL-subject(s)
  *
  * @param {string} subject - The subject to map.
@@ -21,7 +39,7 @@ function mapSubject(subject) {
         return 'terms:title';
     case 'description':
         return 'terms:description';
-    //TODO: remove ext
+    //TODO: remove ext with ^
     case 'sessionLocation':
         return createListQuery(['ext:zitting', 'prov:atLocation']);
     case 'sessionDate':
@@ -93,6 +111,120 @@ function createListQuery(items) {
 }
 
 /**
+ * Find all the filters for the user with the given token.
+ *
+ * @param {string} token - The token to look up.
+ * @returns {Promise<((SubscriptionFilter|undefined)[] | undefined)>} - The list of found
+ * filters or undefined if the user doesn't exist.
+ */
+export async function findFiltersForToken(token) {
+    const queryResult = await querySudo(`
+        PREFIX account: <http://mu.semte.ch/vocabularies/account/>
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+
+        SELECT ?filterUri WHERE {
+            BIND("${token}" as ?userToken)
+            ?user account:password ?userToken;
+                  ext:hasSubscription ?filterUri.
+        }
+    `);
+
+    if (!queryResult || !(queryResult.results)) {
+        return undefined;
+    }
+
+    return await Promise.all(queryResult.results.bindings.map(async (binding) => {
+        return await loadAndConvertFilter(binding['filterUri']['value']);
+    }));
+}
+
+/**
+ * Get the SubscriptionFilterConstraint from a given URI.
+ *
+ * @param {string} uri - The URI to load.
+ * @returns {Promise<SubscriptionFilterConstraint|undefined>} - The
+ * corresponding constraint or undefined if the constraint does not exist or is
+ * invalid.
+ */
+async function uriToConstraint(uri) {
+    const constraintRequest = await querySudo(`
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        SELECT
+            ?subject
+            ?predicate
+            ?object
+        WHERE {
+            BIND(<${uri}> as ?constraint)
+
+            ?constraint ext:constraintSubject ?subject;
+                        ext:constraintPredicate ?predicate;
+                        ext:constraintObject ?object.
+        }
+    `);
+    console.log(constraintRequest.results.bindings);
+
+    if (!constraintRequest ||
+        !constraintRequest.results ||
+        constraintRequest.results.bindings.length == 0) {
+        return undefined;
+    }
+
+    const constraintBindings = constraintRequest.results.bindings[0];
+
+    const uriParts = uri.split('/');
+    return {
+        'id': uriParts[uriParts.length - 1],
+        'subject': constraintBindings['subject']['value'],
+        'predicate': constraintBindings['predicate']['value'],
+        'object': constraintBindings['object']['value'],
+    };
+}
+
+/**
+ * Look up a filter URI in the database and return it as a SubscriptionFilter
+ *
+ * @param {string} uri - The URI to look up.
+ * @returns {Promise<SubscriptionFilter|undefined>} - The filter converted to how
+ * the frontend expects it or undefined if the filter does not exist.
+ */
+export async function loadAndConvertFilter(uri) {
+    const fullFilterResults = await querySudo(`
+        PREFIX sh: <http://www.w3.org/ns/shacl#>
+
+        SELECT ?andOr (GROUP_CONCAT(?constraint ; separator=",") as ?constraints) WHERE {
+          BIND(<${uri}> as ?filter)
+          ?filter ?andOr ?constraintList.
+
+          ?constraintList rdf:rest*/rdf:first ?constraint
+
+          VALUES ?andOr {
+            sh:and
+            sh:or
+          }
+        }
+    `);
+
+    if (!fullFilterResults || !fullFilterResults.results) {
+        return undefined;
+    }
+
+    const fullFilter = fullFilterResults.results.bindings[0];
+
+    const filterUriParts = uri.split('/');
+    const constraints = await Promise.all(
+        fullFilter['constraints']['value']
+            .split(',')
+            .map(uriToConstraint)
+    );
+
+    return {
+        'id': filterUriParts[filterUriParts.length - 1],
+        'require-all': fullFilter['andOr']['value'] === 'http://www.w3.org/ns/shacl#and',
+        'constraints': constraints.filter(x => !!x),
+    };
+}
+
+/**
  * Construct a SPARQL query to store a single frontend-contraint into the
  * database.
  *
@@ -131,7 +263,11 @@ export function constraintToSPARQLQuery(res, constraintUri, subject, predicate, 
 
   INSERT {
     GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-      <${constraintUri}> sh:path ${newSubject}.
+      <${constraintUri}> ext:constraintSubject "${subject}";
+                         ext:constraintPredicate "${predicate}";
+                         ext:constraintObject "${object}";
+                         sh:path ${newSubject}.
+
       <${constraintUri}> ${shaclConstraint}.
     }
   } WHERE {}
@@ -156,7 +292,7 @@ export async function filterToSPARQLQuery(res, filterUri, requireAll, email, con
     const invalidConstraintsResults = await Promise.all(constraints.map(
         async (constraint) => !await verifyConstraint(constraint)
     ));
-  
+
     const invalidConstraints = constraints.filter(
         (_, index) => invalidConstraintsResults[index]
     );
@@ -188,11 +324,13 @@ export async function filterToSPARQLQuery(res, filterUri, requireAll, email, con
         userURI = `http://lokaalbeslist.be/subscriptions/users/${uuid()}`;
         await updateSudo(`
       PREFIX schema: <http://schema.org/>
+      PREFIX account: <http://mu.semte.ch/vocabularies/account/>
 
       INSERT {
         GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
           <${userURI}> a schema:Person;
-                schema:email "${email}".
+                schema:email "${email}";
+                account:password "${uuid()}".
         }
       } WHERE {}
     `);
