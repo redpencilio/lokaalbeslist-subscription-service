@@ -370,6 +370,33 @@ export function createFilter(filterUri, requireAll, constraints) {
 }
 
 /**
+ * Send the email telling the user they are now subscribed and how they can
+ * unsubscribe.
+ *
+ * @param {string} email - The email address of the user.
+ * @param {string} token - The token the user needs to change their preferences.
+ */
+async function sendSubscriptionEmail(email, token) {
+    await updateSudo(`
+        PREFIX nmo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nmo#>
+        PREFIX nie: <http://www.semanticdesktop.org/ontologies/2007/01/19/nie#>
+        PREFIX nfo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#>
+
+        INSERT DATA {
+          GRAPH <http://mu.semte.ch/graphs/system/email> {
+            <http://lokaalbeslist.be/id/emails/${uuid()}> a nmo:Email;
+                nmo:messageFrom "noreply@lokaalbeslist.be";
+                nmo:emailTo "${email}";
+                nmo:messageSubject "Inschrijving notificaties LokaalBeslist.be";
+                nmo:htmlMessageContent "Beste,<br><br>U bent ingeschreven voor notificaties van LokaalBeslist.be. Als u wil uitschrijven voor deze notificaties of uw voorkeuren aanpassen kan dat via volgende link: <a href='http://lokaalbeslist.be/subscriptions?token=${token}'>http://lokaalbeslist.be/subscriptions?token=${token}</a>.<br><br>Met vriendelijke groet,<br>LokaalBeslist.be";
+                nmo:sentDate "";
+                nmo:isPartOf <http://lokaalbeslist.be/id/mail-folders/2>.
+         }
+        }
+    `);
+}
+
+/**
  * Add a subscription to the user with the given email address. This creates a
  * new user if there is no user for the given email address.
  *
@@ -396,6 +423,7 @@ export function addSubscription(filterUri, email) {
             let userURI;
             if (userURIBindings.length === 0) {
                 userURI = `http://lokaalbeslist.be/subscriptions/users/${uuid()}`;
+                let userPassword = uuid();
                 updateSudo(`
                     PREFIX schema: <http://schema.org/>
                     PREFIX account: <http://mu.semte.ch/vocabularies/account/>
@@ -404,10 +432,11 @@ export function addSubscription(filterUri, email) {
                       GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
                         <${userURI}> a schema:Person;
                               schema:email "${email}";
-                              account:password "${uuid()}".
+                              account:password "${userPassword}".
                       }
                     } WHERE {}
-                `).catch(reject);
+                `).then(() => sendSubscriptionEmail(email, userPassword))
+                    .catch(reject);
             } else {
                 userURI = userURIBindings[0].user.value;
             }
