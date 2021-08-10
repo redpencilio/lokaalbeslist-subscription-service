@@ -1,40 +1,85 @@
 import { app, errorHandler, uuid } from 'mu';
-import { querySudo } from '@lblod/mu-auth-sudo';
 import { json } from 'express';
 import { 
     createConstraint,
-    filterToSPARQLQuery,
     findFiltersForToken,
     existsConstraint,
-    deleteConstraint
+    deleteConstraint,
+    existsFilter,
+    createFilter,
+    deleteFilter,
+    addSubscription
 } from './queries';
-import { validateRequest, error, verifyConstraint } from './helpers';
+import { validateRequest, error } from './helpers';
 
 app.use(json());
 
+app.patch('/subscription-filters/:id', async (req, res) => {
+    if (!validateRequest(
+        req,
+        res,
+        'subscription-filters',
+        ['require-all'],
+        ['constraints']
+    )) {
+        return;
+    }
+
+    const filterUri = `http://lokaalbeslist.be/subscriptions/filters/${req.params.id}`;
+
+    if (!await existsFilter(filterUri)) {
+        error(res, `No such filter: ${req.params.id}`, 404);
+        return;
+    }
+
+    const attributes = req.body.data.attributes;
+    const relationships = req.body.data.relationships;
+
+    deleteFilter(
+        filterUri,
+    ).then(
+        () => createFilter(
+            filterUri,
+            attributes['require-all'],
+            relationships.constraints.data,
+        )
+    ).then(() => {
+        res.status(201).set('Location', filterUri).send(JSON.stringify({
+            'data': {
+                'type': 'subscription-filters',
+                'id': req.params.id,
+                'attributes': {
+                    'require-all': attributes['require-all'],
+                },
+                'relationships': relationships
+            }
+        }));
+    });/*.catch((err) => {
+        console.error(err);
+        error(res, err);
+    });*/
+});
+
 app.patch('/subscription-filter-constraints/:id', async (req, res) => {
-    validateRequest(
+    if (!validateRequest(
         req,
         res,
         'subscription-filter-constraints',
         ['subject', 'predicate', 'object']
-    );
+    )) {
+        return;
+    }
+
+    const constraintUri = `http://lokaalbeslist.be/subscriptions/constraints/${req.params.id}`;
         
-    if (!await existsConstraint(req.params.id)) {
+    if (!await existsConstraint(constraintUri)) {
         error(res, 'No such constraint.', 404);
         return;
     }
 
     const attributes = req.body.data.attributes;
-    const resourceId = req.params.id;
-    const constraintUri = `http://lokaalbeslist.be/subscriptions/constraints/${resourceId}`;
 
-    deleteConstraint(
-        constraintUri,
-        attributes['subject'],
-        attributes['predicate'],
-        attributes['object']
-    ).then(
+    deleteConstraint(constraintUri).then(
         () => createConstraint(
             constraintUri,
             attributes['subject'],
@@ -45,7 +90,7 @@ app.patch('/subscription-filter-constraints/:id', async (req, res) => {
         res.status(201).set('Location', constraintUri).send(JSON.stringify({
             'data': {
                 'type': 'subscription-filter-constraints',
-                'id': resourceId,
+                'id': req.params.id,
                 'attributes': {
                     'subject': attributes.subject,
                     'predicate': attributes.predicate,
@@ -126,33 +171,32 @@ app.post('/subscription-filters', async (req, res) => {
     }
 
     const resourceId = uuid();
-    const filterUri = `http://lokaalbeslist.be/subscriptions/constraints/${resourceId}`;
+    const filterUri = `http://lokaalbeslist.be/subscriptions/filters/${resourceId}`;
     const attributes = req.body.data.attributes;
     const relationships = req.body.data.relationships;
 
-    const sparqlQuery = await filterToSPARQLQuery(
-        res,
+    createFilter(
         filterUri,
         attributes['require-all'],
-        attributes['email'],
         relationships.constraints.data,
-    );
-
-    querySudo(sparqlQuery).then(() => {
-        res.status(201).set('Location', filterUri).send(JSON.stringify({
-            'data': {
-                'type': 'subscription-filters',
-                'id': resourceId,
-                'attributes': {
-                    'require-all': attributes['require-all'],
-                },
-                'relationships': relationships
-            }
-        }));
-    }).catch((err) => {
-        console.error(err);
-        error(res, 'Could not execute SPARQL query', 500);
-    });
+    )
+        .then(() => addSubscription(filterUri, attributes['email']))
+        .then(() => {
+            res.status(201).set('Location', filterUri).send(JSON.stringify({
+                'data': {
+                    'type': 'subscription-filters',
+                    'id': resourceId,
+                    'attributes': {
+                        'require-all': attributes['require-all'],
+                    },
+                    'relationships': relationships
+                }
+            }));
+        })
+        .catch((err) => {
+            console.error(err);
+            error(res, err);
+        });
 });
 
 app.post('/subscription-filter-constraints', (req, res) => {

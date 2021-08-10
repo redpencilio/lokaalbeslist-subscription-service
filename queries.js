@@ -275,145 +275,193 @@ export function createConstraint(constraintUri, subject, predicate, object) {
  * Delete a constraint from the database.
  *
  * @param {string} constraintUri - The URI to delete.
- * @param {string} subject - The subject for the constraint.
- * @param {string} predicate - The predicate for the constraint.
- * @param {string} object - The object for the constraint.
  * @returns {Promise} - Resolves when the deletion succeeds, rejects when the
  * SPARQL query fails.
  */
-export async function deleteConstraint(constraintUri, subject, predicate, object) {
+export async function deleteConstraint(constraintUri) {
+    //TODO: Deeper cleaning
+    return updateSudo(`
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        PREFIX prov: <http://www.w3.org/ns/prov#>
+        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+        PREFIX terms: <http://purl.org/dc/terms/>
+        PREFIX sh: <http://www.w3.org/ns/shacl#>
+        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+        DELETE WHERE {
+        GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+            <${constraintUri}> ?p ?o.
+          }
+        }
+    `);
+}
+
+/**
+ * Delete a filter from the database.
+ *
+ * @param {string} filterUri - The URI to delete.
+ * @returns {Promise} - Resolves when the deletion succeeds, rejects when the
+ * SPARQL query fails.
+ */
+export async function deleteFilter(filterUri) {
+    //TODO: Deeper cleaning
+    return updateSudo(`
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        PREFIX prov: <http://www.w3.org/ns/prov#>
+        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+        PREFIX terms: <http://purl.org/dc/terms/>
+        PREFIX sh: <http://www.w3.org/ns/shacl#>
+        PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+        DELETE WHERE {
+        GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+            <${filterUri}> ?p ?o.
+          }
+        }
+    `);
+}
+
+/**
+ * Create a filter and store it to the database.
+ *
+ * @param {string} filterUri - The URI of the filter.
+ * @param {boolean} requireAll - Whether or not all the constraints need to be
+ * fulfilled (if true) or just one (if false).
+ * @param {object[]} constraints - The constraints to add to the filter.
+ */
+export function createFilter(filterUri, requireAll, constraints) {
     return new Promise((resolve, reject) => {
-        const newSubject = mapSubject(subject);
+        // Check if the constraints are valid
+        Promise.all(constraints.map(
+            async (constraint) => !await verifyConstraint(constraint)
+        )).then((invalidConstraintsResults) => {
+            const invalidConstraints = constraints.filter(
+                (_, index) => invalidConstraintsResults[index]
+            );
 
-        if (newSubject === undefined) {
-            return reject(`Invalid subject: ${subject}`);
-        }
-
-        const shaclConstraint = mapPredicateObject(predicate, object);
-
-        if (shaclConstraint === undefined) {
-            return reject(`Invalid predicate: ${predicate}`);
-        }
-
-        //TODO: Deeper cleaning
-        return updateSudo(`
-            PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
-            PREFIX prov: <http://www.w3.org/ns/prov#>
-            PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-            PREFIX terms: <http://purl.org/dc/terms/>
-            PREFIX sh: <http://www.w3.org/ns/shacl#>
-            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-
-            DELETE WHERE {
-            GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-                <${constraintUri}> ?p ?o.
-              }
+            if (invalidConstraints.length == 1) {
+                return reject(`Invalid constraint: '${invalidConstraints[0].id}'.`);
+            } else if (invalidConstraints.length > 1) {
+                return reject(`Invalid constraint: '${invalidConstraints.map((x) => x.id).join('\', \'')}'.`);
             }
-        `).then(resolve).catch(reject);
+        }).then(() => {
+            const constraintURIs = constraints.map((constraint) =>
+                `<http://lokaalbeslist.be/subscriptions/constraints/${constraint.id}>`
+            );
+            return updateSudo(`
+                PREFIX sh: <http://www.w3.org/ns/shacl#>
+                PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+                PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+                PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+                INSERT {
+                  GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+                    <${filterUri}> a sh:NodeShape;
+                                   sh:targetClass besluit:Agendapunt;
+                                   ${requireAll ? 'sh:and' : 'sh:or'} ${createListQuery(constraintURIs)}.
+                  }
+                } WHERE {}
+              `).then(resolve).catch(reject);
+        });
+
     });
 }
 
 /**
- * Construct a SPARQL query to store a single frontend-filter into the database.
+ * Add a subscription to the user with the given email address. This creates a
+ * new user if there is no user for the given email address.
  *
- * @param {Response} res - The response to send error message to.
- * @param {string} filterUri - The URI where the filter needs to be saved.
- * @param {boolean} requireAll - Whether or not all the constraints need to be
- * fulfilled (if true) or just one (if false).
- * @param {string} email - The email address of the user.
- * @param {object[]} constraints - The constraints to add to the filter.
- * @returns {Promise<(string|undefined)>} - The query to execute or undefined if the
- * input was invalid and an error message has been sent.
+ * @param {string} filterUri - The URI to subscribe to.
+ * @param {string} email - The email address.
+ * @returns {Promise} - Resolves if the subscription was successfully added,
+ * rejects if something went wrong.
  */
-export async function filterToSPARQLQuery(res, filterUri, requireAll, email, constraints) {
-
-    // Check if the constraints are valid
-    const invalidConstraintsResults = await Promise.all(constraints.map(
-        async (constraint) => !await verifyConstraint(constraint)
-    ));
-
-    const invalidConstraints = constraints.filter(
-        (_, index) => invalidConstraintsResults[index]
-    );
-
-    if (invalidConstraints.length == 1) {
-        error(res, `Invalid constraint: '${invalidConstraints[0].id}'.`);
-        return undefined;
-    } else if (invalidConstraints.length > 1) {
-        error(res, `Invalid constraint: '${invalidConstraints.map((x) => x.id).join('\', \'')}'.`);
-        return undefined;
-    }
-
+export function addSubscription(filterUri, email) {
     // Check if the user exists and create one if it doesn't
-    const userURIQuery = await querySudo(`
-    PREFIX schema: <http://schema.org/>
+    return new Promise((resolve, reject) => {
+        querySudo(`
+            PREFIX schema: <http://schema.org/>
 
-    SELECT ?user WHERE {
-      GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-        ?user a schema:Person;
-              schema:email "${email}".
-      }
-    }
-  `);
+            SELECT ?user WHERE {
+              GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+                ?user a schema:Person;
+                      schema:email "${email}".
+              }
+            }
+        `).then((userURIQuery) => {
+            const userURIBindings = userURIQuery.results.bindings;
 
-    const userURIBindings = userURIQuery.results.bindings;
+            let userURI;
+            if (userURIBindings.length === 0) {
+                userURI = `http://lokaalbeslist.be/subscriptions/users/${uuid()}`;
+                updateSudo(`
+                    PREFIX schema: <http://schema.org/>
+                    PREFIX account: <http://mu.semte.ch/vocabularies/account/>
 
-    let userURI;
-    if (userURIBindings.length === 0) {
-        userURI = `http://lokaalbeslist.be/subscriptions/users/${uuid()}`;
-        await updateSudo(`
-      PREFIX schema: <http://schema.org/>
-      PREFIX account: <http://mu.semte.ch/vocabularies/account/>
+                    INSERT {
+                      GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+                        <${userURI}> a schema:Person;
+                              schema:email "${email}";
+                              account:password "${uuid()}".
+                      }
+                    } WHERE {}
+                `).catch(reject);
+            } else {
+                userURI = userURIBindings[0].user.value;
+            }
 
-      INSERT {
-        GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-          <${userURI}> a schema:Person;
-                schema:email "${email}";
-                account:password "${uuid()}".
-        }
-      } WHERE {}
-    `);
-    } else {
-        console.log(userURIBindings[0]);
-        userURI = userURIBindings[0].user.value;
-    }
+            updateSudo(`
+                PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
 
-    // Construct the query
-    const constraintURIs = constraints.map((constraint) => `<http://lokaalbeslist.be/subscriptions/constraints/${constraint.id}>`);
-    return `
-  PREFIX sh: <http://www.w3.org/ns/shacl#>
-  PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-  PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
-  PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-
-  INSERT {
-    GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-      <${userURI}> ext:hasSubscription <${filterUri}>.
-      <${filterUri}> a sh:NodeShape;
-                     sh:targetClass besluit:Agendapunt;
-                     ${requireAll ? 'sh:and' : 'sh:or'} ${createListQuery(constraintURIs)}.
-    }
-  } WHERE {}
-  `;
+                INSERT DATA {
+                  GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+                    <${userURI}> ext:hasSubscription <${filterUri}>.
+                  }
+                }
+            `).then(resolve).catch(reject);
+        });
+    });
 }
 
-
 /**
- * Check if a constraint with that id exists.
+ * Check if a constraint with a given URI exists.
  *
- * @param {string} id - The id.
+ * @param {string} uri - The URI to check.
  * @returns {Promise<boolean>} - True if the constraint exists, false otherwise.
  */
-export async function existsConstraint(id) {
+export async function existsConstraint(uri) {
     return await querySudo(`
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         ASK WHERE {
-            BIND(<http://lokaalbeslist.be/subscriptions/constraints/${id}> as ?constraint)
+            BIND(<${uri}> as ?constraint)
 
             ?constraint ext:constraintSubject ?subject;
                         ext:constraintPredicate ?predicate;
                         ext:constraintObject ?object.
+        }
+    `).then((result) => result.boolean);
+}
+
+/**
+ * Check if a filter with a given URI exists.
+ *
+ * @param {string} uri - The URI to check.
+ * @returns {Promise<boolean>} - True if the filter exists, false otherwise.
+ */
+export async function existsFilter(uri) {
+    return await querySudo(`
+        PREFIX sh: <http://www.w3.org/ns/shacl#>
+        PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+        ASK WHERE {
+          GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+            <${uri}> a sh:NodeShape;
+                     sh:targetClass besluit:Agendapunt.
+          }
         }
     `).then((result) => result.boolean);
 }
