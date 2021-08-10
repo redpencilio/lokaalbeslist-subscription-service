@@ -14,6 +14,23 @@ import { validateRequest, error } from './helpers';
 
 app.use(json());
 
+app.delete('/subscription-filter-constraints/:id', async (req, res) => {
+    const constraintUri = `http://lokaalbeslist.be/subscriptions/constraints/${req.params.id}`;
+
+    if (!await existsConstraint(constraintUri)) {
+        error(res, 'No such constraint.', 404);
+        return;
+    }
+
+    deleteConstraint(constraintUri)
+        .then(() => {
+            res.status(202).send('OK');
+        }).catch((err) => {
+            console.error(err);
+            error(res, err);
+        });
+});
+
 app.patch('/subscription-filters/:id', async (req, res) => {
     if (!validateRequest(
         req,
@@ -79,29 +96,29 @@ app.patch('/subscription-filter-constraints/:id', async (req, res) => {
 
     const attributes = req.body.data.attributes;
 
-    deleteConstraint(constraintUri).then(
-        () => createConstraint(
+    deleteConstraint(constraintUri)
+        .then(() => createConstraint(
             constraintUri,
             attributes['subject'],
             attributes['predicate'],
             attributes['object']
         )
-    ).then(() => {
-        res.status(201).set('Location', constraintUri).send(JSON.stringify({
-            'data': {
-                'type': 'subscription-filter-constraints',
-                'id': req.params.id,
-                'attributes': {
-                    'subject': attributes.subject,
-                    'predicate': attributes.predicate,
-                    'object': attributes.object,
+        ).then(() => {
+            res.status(201).set('Location', constraintUri).send(JSON.stringify({
+                'data': {
+                    'type': 'subscription-filter-constraints',
+                    'id': req.params.id,
+                    'attributes': {
+                        'subject': attributes.subject,
+                        'predicate': attributes.predicate,
+                        'object': attributes.object,
+                    }
                 }
-            }
-        }));
-    }).catch((err) => {
-        console.error(err);
-        error(res, err);
-    });
+            }));
+        }).catch((err) => {
+            console.error(err);
+            error(res, err);
+        });
 });
 
 app.get('/subscription-filters', async (req, res) => {
