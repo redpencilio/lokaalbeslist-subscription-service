@@ -1,10 +1,63 @@
 import { app, errorHandler, uuid } from 'mu';
-import { updateSudo, querySudo } from '@lblod/mu-auth-sudo';
+import { querySudo } from '@lblod/mu-auth-sudo';
 import { json } from 'express';
-import { constraintToSPARQLQuery, filterToSPARQLQuery, findFiltersForToken } from './queries';
-import { validateRequest, error } from './helpers';
+import { 
+    createConstraint,
+    filterToSPARQLQuery,
+    findFiltersForToken,
+    existsConstraint,
+    deleteConstraint
+} from './queries';
+import { validateRequest, error, verifyConstraint } from './helpers';
 
 app.use(json());
+
+app.patch('/subscription-filter-constraints/:id', async (req, res) => {
+    validateRequest(
+        req,
+        res,
+        'subscription-filter-constraints',
+        ['subject', 'predicate', 'object']
+    );
+        
+    if (!await existsConstraint(req.params.id)) {
+        error(res, 'No such constraint.', 404);
+        return;
+    }
+
+    const attributes = req.body.data.attributes;
+    const resourceId = req.params.id;
+    const constraintUri = `http://lokaalbeslist.be/subscriptions/constraints/${resourceId}`;
+
+    deleteConstraint(
+        constraintUri,
+        attributes['subject'],
+        attributes['predicate'],
+        attributes['object']
+    ).then(
+        () => createConstraint(
+            constraintUri,
+            attributes['subject'],
+            attributes['predicate'],
+            attributes['object']
+        )
+    ).then(() => {
+        res.status(201).set('Location', constraintUri).send(JSON.stringify({
+            'data': {
+                'type': 'subscription-filter-constraints',
+                'id': resourceId,
+                'attributes': {
+                    'subject': attributes.subject,
+                    'predicate': attributes.predicate,
+                    'object': attributes.object,
+                }
+            }
+        }));
+    }).catch((err) => {
+        console.error(err);
+        error(res, err);
+    });
+});
 
 app.get('/subscription-filters', async (req, res) => {
     if (req.query['token'] === undefined) {
@@ -14,7 +67,7 @@ app.get('/subscription-filters', async (req, res) => {
 
     const filters = await findFiltersForToken(req.query.token);
 
-    if (!filters) {
+    if (!filters || filters.length === 0) {
         error(res, 'User not found');
         return;
     }
@@ -117,19 +170,12 @@ app.post('/subscription-filter-constraints', (req, res) => {
     const resourceId = uuid();
     const constraintUri = `http://lokaalbeslist.be/subscriptions/constraints/${resourceId}`;
 
-    const sparqlQuery = constraintToSPARQLQuery(
-        res,
+    createConstraint(
         constraintUri,
         attributes['subject'],
         attributes['predicate'],
         attributes['object']
-    );
-
-    if (sparqlQuery === undefined) {
-        return;
-    }
-
-    updateSudo(sparqlQuery).then(() => {
+    ).then(() => {
         res.status(201).set('Location', constraintUri).send(JSON.stringify({
             'data': {
                 'type': 'subscription-filter-constraints',
@@ -142,8 +188,7 @@ app.post('/subscription-filter-constraints', (req, res) => {
             }
         }));
     }).catch((err) => {
-        console.error(err);
-        error(res, 'Could not execute SPARQL query', 500);
+        error(res, err);
     });
 });
 

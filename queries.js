@@ -161,7 +161,6 @@ async function uriToConstraint(uri) {
                         ext:constraintObject ?object.
         }
     `);
-    console.log(constraintRequest.results.bindings);
 
     if (!constraintRequest ||
         !constraintRequest.results ||
@@ -225,53 +224,94 @@ export async function loadAndConvertFilter(uri) {
 }
 
 /**
- * Construct a SPARQL query to store a single frontend-contraint into the
- * database.
+ * Store a new constraint to the database.
  *
- * @param {Response} res - The response to send error messages to.
  * @param {string} constraintUri - The URI where the constraint needs to be
  * saved.
  * @param {string} subject - The subject for the constraint.
  * @param {string} predicate - The predicate for the constraint.
  * @param {string} object - The object for the constraint.
- * @returns {(string|undefined)} - The query if the input was valid or undefined
- * if the input was invalid and an error message has been sent back.
+ * @returns {Promise} - Resolves when the SPARQL query has been executed,
+ * rejects with an error message if the input was invalid or the query failed.
  */
-export function constraintToSPARQLQuery(res, constraintUri, subject, predicate, object) {
-    const newSubject = mapSubject(subject);
+export function createConstraint(constraintUri, subject, predicate, object) {
+    return new Promise((resolve, reject) => {
+        const newSubject = mapSubject(subject);
 
-    if (newSubject === undefined) {
-        error(res, `Invalid subject: ${subject}`);
-        return undefined;
-    }
+        if (newSubject === undefined) {
+            return reject(`Invalid subject: ${subject}`);
+        }
 
-    const shaclConstraint = mapPredicateObject(predicate, object);
+        const shaclConstraint = mapPredicateObject(predicate, object);
 
-    if (shaclConstraint === undefined) {
-        error(res, `Invalid predicate: ${predicate}`);
-        return undefined;
-    }
+        if (shaclConstraint === undefined) {
+            return reject(`Invalid predicate: ${predicate}`);
+        }
 
-    return `
-  PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
-  PREFIX prov: <http://www.w3.org/ns/prov#>
-  PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
-  PREFIX terms: <http://purl.org/dc/terms/>
-  PREFIX sh: <http://www.w3.org/ns/shacl#>
-  PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-  PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+        return updateSudo(`
+            PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+            PREFIX prov: <http://www.w3.org/ns/prov#>
+            PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+            PREFIX terms: <http://purl.org/dc/terms/>
+            PREFIX sh: <http://www.w3.org/ns/shacl#>
+            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
-  INSERT {
-    GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-      <${constraintUri}> ext:constraintSubject "${subject}";
-                         ext:constraintPredicate "${predicate}";
-                         ext:constraintObject "${object}";
-                         sh:path ${newSubject}.
+            INSERT {
+            GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+              <${constraintUri}> ext:constraintSubject "${subject}";
+                                 ext:constraintPredicate "${predicate}";
+                                 ext:constraintObject "${object}";
+                                 sh:path ${newSubject}.
 
-      <${constraintUri}> ${shaclConstraint}.
-    }
-  } WHERE {}
-  `;
+              <${constraintUri}> ${shaclConstraint}.
+            }
+            } WHERE {}
+        `).then(resolve).catch(reject);
+    });
+}
+
+/**
+ * Delete a constraint from the database.
+ *
+ * @param {string} constraintUri - The URI to delete.
+ * @param {string} subject - The subject for the constraint.
+ * @param {string} predicate - The predicate for the constraint.
+ * @param {string} object - The object for the constraint.
+ * @returns {Promise} - Resolves when the deletion succeeds, rejects when the
+ * SPARQL query fails.
+ */
+export async function deleteConstraint(constraintUri, subject, predicate, object) {
+    return new Promise((resolve, reject) => {
+        const newSubject = mapSubject(subject);
+
+        if (newSubject === undefined) {
+            return reject(`Invalid subject: ${subject}`);
+        }
+
+        const shaclConstraint = mapPredicateObject(predicate, object);
+
+        if (shaclConstraint === undefined) {
+            return reject(`Invalid predicate: ${predicate}`);
+        }
+
+        //TODO: Deeper cleaning
+        return updateSudo(`
+            PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+            PREFIX prov: <http://www.w3.org/ns/prov#>
+            PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
+            PREFIX terms: <http://purl.org/dc/terms/>
+            PREFIX sh: <http://www.w3.org/ns/shacl#>
+            PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+            PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+            DELETE WHERE {
+            GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+                <${constraintUri}> ?p ?o.
+              }
+            }
+        `).then(resolve).catch(reject);
+    });
 }
 
 /**
@@ -358,3 +398,22 @@ export async function filterToSPARQLQuery(res, filterUri, requireAll, email, con
   `;
 }
 
+
+/**
+ * Check if a constraint with that id exists.
+ *
+ * @param {string} id - The id.
+ * @returns {Promise<boolean>} - True if the constraint exists, false otherwise.
+ */
+export async function existsConstraint(id) {
+    return await querySudo(`
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+        ASK WHERE {
+            BIND(<http://lokaalbeslist.be/subscriptions/constraints/${id}> as ?constraint)
+
+            ?constraint ext:constraintSubject ?subject;
+                        ext:constraintPredicate ?predicate;
+                        ext:constraintObject ?object.
+        }
+    `).then((result) => result.boolean);
+}
