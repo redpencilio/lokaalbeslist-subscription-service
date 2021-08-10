@@ -14,6 +14,23 @@ import { validateRequest, error } from './helpers';
 
 app.use(json());
 
+app.delete('/subscription-filters/:id', async (req, res) => {
+    const filterUri = `http://lokaalbeslist.be/subscriptions/filters/${req.params.id}`;
+
+    if (!await existsFilter(filterUri)) {
+        error(res, 'No such filter.', 404);
+        return;
+    }
+
+    deleteFilter(filterUri)
+        .then(() => {
+            res.status(204).send();
+        }).catch((err) => {
+            console.error(err);
+            error(res, err);
+        });
+});
+
 app.delete('/subscription-filter-constraints/:id', async (req, res) => {
     const constraintUri = `http://lokaalbeslist.be/subscriptions/constraints/${req.params.id}`;
 
@@ -24,7 +41,7 @@ app.delete('/subscription-filter-constraints/:id', async (req, res) => {
 
     deleteConstraint(constraintUri)
         .then(() => {
-            res.status(202).send('OK');
+            res.status(204).send();
         }).catch((err) => {
             console.error(err);
             error(res, err);
