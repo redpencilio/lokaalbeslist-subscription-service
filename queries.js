@@ -385,7 +385,7 @@ async function sendSubscriptionEmail(email, token) {
         INSERT DATA {
           GRAPH <http://mu.semte.ch/graphs/system/email> {
             <http://lokaalbeslist.be/id/emails/${uuid()}> a nmo:Email;
-                nmo:messageFrom "noreply@lokaalbeslist.be";
+                nmo:messageFrom "lokaalbeslist@semantic.works";
                 nmo:emailTo "${email}";
                 nmo:messageSubject "Inschrijving notificaties LokaalBeslist.be";
                 nmo:htmlMessageContent "Beste,<br><br>U bent ingeschreven voor notificaties van LokaalBeslist.be. Als u wil uitschrijven voor deze notificaties of uw voorkeuren aanpassen kan dat via volgende link: <a href='http://lokaalbeslist.be/subscriptions?token=${token}'>http://lokaalbeslist.be/subscriptions?token=${token}</a>.<br><br>Met vriendelijke groet,<br>LokaalBeslist.be";
