@@ -223,8 +223,6 @@ export async function findFilter(uri) {
             .map(findFilter)
             .filter((x) => !!x)
     );
-    console.log(constraints);
-    console.log(subFilters);
 
     return {
         'id': filterUriParts[filterUriParts.length - 1],
@@ -392,6 +390,7 @@ export function createFilter(filterUri, requireAll, constraints, subFilters) {
                 );
             }
             if (subFilters) {
+                console.log(subFilters);
                 subFilters.forEach((subFilter) => 
                     requirements.push(
                         `<http://lokaalbeslist.be/subscriptions/filters/${subFilter.id}>`
@@ -417,7 +416,7 @@ export function createFilter(filterUri, requireAll, constraints, subFilters) {
                   }
                 }
             `).then(resolve).catch(reject);
-        });
+        }).catch(reject);
     });
 
 }

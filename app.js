@@ -55,8 +55,7 @@ app.patch('/subscription-filters/:id', async (req, res) => {
         req,
         res,
         'subscription-filters',
-        ['require-all'],
-        ['constraints']
+        ['require-all']
     )) {
         return;
     }
@@ -70,6 +69,7 @@ app.patch('/subscription-filters/:id', async (req, res) => {
 
     const attributes = req.body.data.attributes;
     const relationships = req.body.data.relationships;
+    const subFilters = (relationships ? relationships['sub-filters'] : undefined);
 
     deleteFilter(
         filterUri,
@@ -78,6 +78,7 @@ app.patch('/subscription-filters/:id', async (req, res) => {
             filterUri,
             attributes['require-all'],
             relationships.constraints.data,
+            subFilters
         )
     ).then(() => {
         res.status(201).set('Location', filterUri).send(JSON.stringify({
@@ -87,7 +88,10 @@ app.patch('/subscription-filters/:id', async (req, res) => {
                 'attributes': {
                     'require-all': attributes['require-all'],
                 },
-                'relationships': relationships
+                'relationships': {
+                    'sub-filters': subFilters,
+                    'constraints': relationships.constraints,
+                }
             }
         }));
     }).catch((err) => {
