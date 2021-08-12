@@ -8,7 +8,9 @@ import {
     existsFilter,
     createFilter,
     deleteFilter,
-    addSubscription
+    addSubscription,
+    findFilter,
+    findConstraint
 } from './queries';
 import { validateRequest, error } from './helpers';
 
@@ -138,6 +140,68 @@ app.patch('/subscription-filter-constraints/:id', async (req, res) => {
         });
 });
 
+app.get('/subscription-filter-constraints/:id', async (req, res) => {
+    const constraint = await findConstraint(`http://lokaalbeslist.be/subscriptions/constraints/${req.params.id}`);
+
+    if (!constraint) {
+        error(res, 'No such subscription-filter-constraint', 404);
+    }
+
+    res.send(JSON.stringify({
+        'data': {
+            'type': 'subscription-filter-constraints',
+            'id': constraint.id,
+            'attributes': {
+                'subject': constraint.subject,
+                'predicate': constraint.predicate,
+                'object': constraint.object
+            }
+        }
+    }));
+});
+
+app.get('/subscription-filters/:id', async (req, res) => {
+    const filter = await findFilter(`http://lokaalbeslist.be/subscriptions/filters/${req.params.id}`);
+
+    if (!filter) {
+        error(res, 'No such subscription-filter', 404);
+        return;
+    }
+
+    const constraintsJSONAPI = filter.constraints.map((constraint) => {
+        return {
+            'type': 'subscription-filter-constraints',
+            'id': constraint.id,
+        };
+    });
+
+    const subFiltersJSONAPI = filter['sub-filters'].map((subFilter) => {
+        return {
+            'type': 'subscription-filters',
+            'id': subFilter.id,
+        };
+    });
+
+    res.send(JSON.stringify({
+        'data': {
+            'type': 'subscription-filters',
+            'id': filter.id,
+            'attributes': {
+                'require-all': filter.requireAll
+            },
+            'relationships': {
+                'constraints': {
+                    'data': constraintsJSONAPI,
+                },
+                'sub-filters': {
+                    'data': subFiltersJSONAPI,
+                }
+            },
+        }
+    }));
+
+});
+
 app.get('/subscription-filters', async (req, res) => {
     if (req.query['token'] === undefined) {
         error(res, 'Missing token.');
@@ -152,6 +216,7 @@ app.get('/subscription-filters', async (req, res) => {
     }
 
     let constraints = [];
+    let subFilters = [];
 
     const filtersJSONAPI = filters.filter((f) => !!f).map((filter) => {
         filter.constraints.forEach((constraint) => {
@@ -163,6 +228,17 @@ app.get('/subscription-filters', async (req, res) => {
                 'id': constraint.id,
             };
         });
+
+        filter['sub-filters'].forEach((subFilter) => {
+            subFilters.push(subFilter);
+        });
+        const subFiltersJSONAPI = filter['sub-filters'].map((subFilter) => {
+            return {
+                'type': 'subscription-filters',
+                'id': subFilter.id,
+            };
+        });
+
         return {
             'type': 'subscription-filters',
             'id': filter.id,
@@ -171,7 +247,10 @@ app.get('/subscription-filters', async (req, res) => {
             },
             'relationships': {
                 'constraints': {
-                    'data': constraintsJSONAPI
+                    'data': constraintsJSONAPI,
+                },
+                'sub-filters': {
+                    'data': subFiltersJSONAPI,
                 }
             },
         };

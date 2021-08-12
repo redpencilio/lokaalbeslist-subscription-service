@@ -136,7 +136,7 @@ export async function findFiltersForToken(token) {
     }
 
     return await Promise.all(queryResult.results.bindings.map(async (binding) => {
-        return await loadAndConvertFilter(binding['filterUri']['value']);
+        return await findFilter(binding['filterUri']['value']);
     }));
 }
 
@@ -148,7 +148,7 @@ export async function findFiltersForToken(token) {
  * corresponding constraint or undefined if the constraint does not exist or is
  * invalid.
  */
-async function uriToConstraint(uri) {
+export async function findConstraint(uri) {
     const constraintRequest = await querySudo(`
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         SELECT
@@ -188,7 +188,7 @@ async function uriToConstraint(uri) {
  * @returns {Promise<SubscriptionFilter|undefined>} - The filter converted to how
  * the frontend expects it or undefined if the filter does not exist.
  */
-export async function loadAndConvertFilter(uri) {
+export async function findFilter(uri) {
     const fullFilterResults = await querySudo(`
         PREFIX sh: <http://www.w3.org/ns/shacl#>
 
@@ -215,13 +215,22 @@ export async function loadAndConvertFilter(uri) {
     const constraints = await Promise.all(
         fullFilter['constraints']['value']
             .split(',')
-            .map(uriToConstraint)
+            .map(findConstraint)
     );
+    const subFilters = await Promise.all(
+        fullFilter['constraints']['value']
+            .split(',')
+            .map(findFilter)
+            .filter((x) => !!x)
+    );
+    console.log(constraints);
+    console.log(subFilters);
 
     return {
         'id': filterUriParts[filterUriParts.length - 1],
         'require-all': fullFilter['andOr']['value'] === 'http://www.w3.org/ns/shacl#and',
         'constraints': constraints.filter(x => !!x),
+        'sub-filters': subFilters.filter(x => !!x),
     };
 }
 
