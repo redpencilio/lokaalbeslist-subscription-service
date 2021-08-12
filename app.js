@@ -77,7 +77,7 @@ app.patch('/subscription-filters/:id', async (req, res) => {
         () => createFilter(
             filterUri,
             attributes['require-all'],
-            relationships.constraints.data,
+            relationships.constraints?.data,
             subFilters
         )
     ).then(() => {
