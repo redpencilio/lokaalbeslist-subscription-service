@@ -1,6 +1,6 @@
 import { updateSudo, querySudo } from '@lblod/mu-auth-sudo';
 import { uuid } from 'mu';
-import { error, verifyConstraint } from './helpers';
+import { verifyConstraint, verifyFilter } from './helpers';
 
 /**
  * @typedef {import('express').Request} Request
@@ -22,7 +22,9 @@ import { error, verifyConstraint } from './helpers';
  * @property {boolean} requireAll - Require all the constraints to be met if
  * true, only one if false.
  * @property {SubscriptionFilterConstraint[]} constraints - The
- * constraints for this filter either as objects or as their IDs.
+ * constraints for this filter.
+ * @property {SubscriptionFilter[]} sub-filters - The subfilters that should
+ * match as well.
  */
 
 /**
@@ -203,7 +205,7 @@ export async function loadAndConvertFilter(uri) {
         }
     `);
 
-    if (!fullFilterResults || !fullFilterResults.results) {
+    if (!fullFilterResults || !fullFilterResults.results || fullFilterResults.results.bindings.length == 0) {
         return undefined;
     }
 
@@ -329,44 +331,86 @@ export async function deleteFilter(filterUri) {
  * @param {string} filterUri - The URI of the filter.
  * @param {boolean} requireAll - Whether or not all the constraints need to be
  * fulfilled (if true) or just one (if false).
- * @param {object[]} constraints - The constraints to add to the filter.
+ * @param {(object[]|undefined)} constraints - The constraints to add to the filter.
+ * @param {(object[]|undefined)} subFilters - The subfilters for this filter.
  */
-export function createFilter(filterUri, requireAll, constraints) {
+export function createFilter(filterUri, requireAll, constraints, subFilters) {
     return new Promise((resolve, reject) => {
-        // Check if the constraints are valid
-        Promise.all(constraints.map(
-            async (constraint) => !await verifyConstraint(constraint)
-        )).then((invalidConstraintsResults) => {
-            const invalidConstraints = constraints.filter(
-                (_, index) => invalidConstraintsResults[index]
-            );
+        let promises = [];
 
-            if (invalidConstraints.length == 1) {
-                return reject(`Invalid constraint: '${invalidConstraints[0].id}'.`);
-            } else if (invalidConstraints.length > 1) {
-                return reject(`Invalid constraint: '${invalidConstraints.map((x) => x.id).join('\', \'')}'.`);
+        // Check if the constraints are valid
+        if (constraints && constraints.length > 0) {
+            Promise.all(constraints.map(
+                async (constraint) => !await verifyConstraint(constraint)
+            )).then((invalidConstraintsResults) => {
+                const invalidConstraints = constraints.filter(
+                    (_, index) => invalidConstraintsResults[index]
+                );
+
+                if (invalidConstraints.length == 1) {
+                    return reject(`Invalid constraint: '${invalidConstraints[0].id}'.`);
+                } else if (invalidConstraints.length > 1) {
+                    return reject(`Invalid constraint: '${invalidConstraints.map((x) => x.id).join('\', \'')}'.`);
+                }
+            }).catch(reject);
+        }
+
+        // Check if the subfilters are valid.
+        if (subFilters && subFilters.length > 0) {
+            Promise.all(subFilters.map(
+                async (subFilter) => !await verifyFilter(subFilter)
+            )).then((invalidSubFilterResults) => {
+                const invalidSubFilters = subFilters.filter(
+                    (_, index) => invalidSubFilterResults[index]
+                );
+
+                if (invalidSubFilters.length == 1) {
+                    return reject(`Invalid sub-filter: '${invalidSubFilters[0].id}'.`);
+                } else if (invalidSubFilters.length > 1) {
+                    return reject(`Invalid sub-filter: '${invalidSubFilters.map((x) => x.id).join('\', \'')}'.`);
+                }
+            }).catch(reject);
+        }
+
+        Promise.all(promises).then(() => {
+            let requirements = [];
+
+            if (constraints) {
+                constraints.forEach((constraint) =>
+                    requirements.push(
+                        `<http://lokaalbeslist.be/subscriptions/constraints/${constraint.id}>`
+                    )
+                );
             }
-        }).then(() => {
-            const constraintURIs = constraints.map((constraint) =>
-                `<http://lokaalbeslist.be/subscriptions/constraints/${constraint.id}>`
-            );
+            if (subFilters) {
+                subFilters.forEach((subFilter) => 
+                    requirements.push(
+                        `<http://lokaalbeslist.be/subscriptions/filters/${subFilter.id}>`
+                    )
+                );
+            }
+
+            if (requirements.length === 0) {
+                return reject('Need at least one constraint or subFilter');
+            }
+
             return updateSudo(`
                 PREFIX sh: <http://www.w3.org/ns/shacl#>
                 PREFIX besluit: <http://data.vlaanderen.be/ns/besluit#>
                 PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
                 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
-                INSERT {
+                INSERT DATA {
                   GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
                     <${filterUri}> a sh:NodeShape;
                                    sh:targetClass besluit:Agendapunt;
-                                   ${requireAll ? 'sh:and' : 'sh:or'} ${createListQuery(constraintURIs)}.
+                                   ${requireAll ? 'sh:and' : 'sh:or'} ${createListQuery(requirements)}.
                   }
-                } WHERE {}
-              `).then(resolve).catch(reject);
+                }
+            `).then(resolve).catch(reject);
         });
-
     });
+
 }
 
 /**

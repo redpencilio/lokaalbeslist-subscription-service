@@ -88,10 +88,10 @@ app.patch('/subscription-filters/:id', async (req, res) => {
                 'relationships': relationships
             }
         }));
-    });/*.catch((err) => {
+    }).catch((err) => {
         console.error(err);
         error(res, err);
-    });*/
+    });
 });
 
 app.patch('/subscription-filter-constraints/:id', async (req, res) => {
@@ -198,8 +198,7 @@ app.post('/subscription-filters', async (req, res) => {
         req,
         res,
         'subscription-filters',
-        ['require-all', 'email'],
-        ['constraints']
+        ['require-all', 'email']
     )) {
         return;
     }
@@ -208,11 +207,13 @@ app.post('/subscription-filters', async (req, res) => {
     const filterUri = `http://lokaalbeslist.be/subscriptions/filters/${resourceId}`;
     const attributes = req.body.data.attributes;
     const relationships = req.body.data.relationships;
+    const subFilters = (relationships ? relationships['sub-filters'] : undefined);
 
     createFilter(
         filterUri,
         attributes['require-all'],
-        relationships.constraints.data,
+        relationships?.constraints?.data,
+        subFilters?.data,
     )
         .then(() => addSubscription(filterUri, attributes['email']))
         .then(() => {
@@ -223,7 +224,10 @@ app.post('/subscription-filters', async (req, res) => {
                     'attributes': {
                         'require-all': attributes['require-all'],
                     },
-                    'relationships': relationships
+                    'relationships': {
+                        'sub-filters': subFilters,
+                        'constraints': relationships.constraints,
+                    }
                 }
             }));
         })

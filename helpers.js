@@ -30,6 +30,30 @@ export async function verifyConstraint(constraint) {
 }
 
 /**
+ * Verify a single filter, checking if it has the right (JSON:API) type and
+ * if a filter with that ID exists.
+ *
+ * @param {object} filter - The filter to check.
+ * @returns {Promise<boolean>} - True if the filter is valid and exists, false
+ * otherwise.
+ */
+export async function verifyFilter(filter) {
+    if (filter.type !== 'subscription-filters' ||
+        !Object.prototype.hasOwnProperty.call(filter, 'id')) {
+        return false;
+    }
+
+    return await querySudo(`
+    PREFIX sh: <http://www.w3.org/ns/shacl#>
+
+    ASK {
+      BIND(<http://lokaalbeslist.be/subscriptions/filters/${filter.id}> as ?filter).
+      ?filter a sh:NodeShape.
+    }`
+    ).then((res) => res.boolean);
+}
+
+/**
  * Send a JSON:API compliant error message.
  *
  * @param {Response} res - The response to send the message to.
