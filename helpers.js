@@ -6,6 +6,20 @@ import { querySudo } from '@lblod/mu-auth-sudo';
  */
 
 /**
+ * Escape special characters from a string for SPARQL queries.
+ *
+ * @param {string} str - The string to escape.
+ * @returns {string} - The escaped string.
+ */
+export function escapeSparqlString(str) {
+    return str.replaceAll('\'', '\\\'')
+        .replaceAll('"', '\\"')
+        .replaceAll('\\', '\\\\')
+        .replaceAll('\n', '\\n')
+        .replaceAll('\r', '\\r');
+}
+
+/**
  * Verify a single constraint, checking if it has the right (JSON:API) type and
  * if a constraint with that ID exists.
  *

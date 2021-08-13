@@ -1,6 +1,6 @@
 import { updateSudo, querySudo } from '@lblod/mu-auth-sudo';
 import { uuid } from 'mu';
-import { verifyConstraint, verifyFilter } from './helpers';
+import { verifyConstraint, verifyFilter, escapeSparqlString } from './helpers';
 
 /**
  * @typedef {import('express').Request} Request
@@ -65,9 +65,9 @@ function mapPredicateObject(predicate, object) {
     switch (predicate) {
     case 'textEquals':
     case 'governanceAreaEquals':
-        return `sh:pattern "^${object}$"; sh:flags "i"`;
+        return `sh:pattern "^${escapeSparqlString(object)}$"; sh:flags "i"`;
     case 'textContains':
-        return `sh:pattern "${object}"; sh:flags "i"`;
+        return `sh:pattern "${escapeSparqlString(object)}"; sh:flags "i"`;
     case 'exists':
         return 'sh:minCount 1';
     case 'notExists':
@@ -99,14 +99,14 @@ function createListQuery(items) {
 
     for (let i = 0; i < items.length - 1; i++) {
         let nextNode = listURI();
-        ret += `<${currentNode}> rdf:first ${items[i]};
+        ret += `<${currentNode}> rdf:first ${escapeSparqlString(items[i])};
     rdf:rest <${nextNode}>.
     `;
 
         currentNode = nextNode;
     }
 
-    ret += `<${currentNode}> rdf:first ${items[items.length-1]};
+    ret += `<${currentNode}> rdf:first ${escapeSparqlString(items[items.length-1])};
   rdf:rest rdf:nil`;
 
     return ret;
@@ -193,7 +193,7 @@ export async function findFilter(uri) {
         PREFIX sh: <http://www.w3.org/ns/shacl#>
 
         SELECT ?andOr (GROUP_CONCAT(?constraint ; separator=",") as ?constraints) WHERE {
-          BIND(<${uri}> as ?filter)
+          BIND(<${escapeSparqlString(uri)}> as ?filter)
           ?filter ?andOr ?constraintList.
 
           ?constraintList rdf:rest*/rdf:first ?constraint
@@ -268,12 +268,12 @@ export function createConstraint(constraintUri, subject, predicate, object) {
 
             INSERT {
             GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-              <${constraintUri}> ext:constraintSubject "${subject}";
-                                 ext:constraintPredicate "${predicate}";
-                                 ext:constraintObject "${object}";
+              <${escapeSparqlString(constraintUri)}> ext:constraintSubject "${escapeSparqlString(subject)}";
+                                 ext:constraintPredicate "${escapeSparqlString(predicate)}";
+                                 ext:constraintObject "${escapeSparqlString(object)}";
                                  sh:path ${newSubject}.
 
-              <${constraintUri}> ${shaclConstraint}.
+              <${escapeSparqlString(constraintUri)}> ${shaclConstraint}.
             }
             } WHERE {}
         `).then(resolve).catch(reject);
@@ -300,7 +300,7 @@ export async function deleteConstraint(constraintUri) {
 
         DELETE WHERE {
         GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-            <${constraintUri}> ?p ?o.
+            <${escapeSparqlString(constraintUri)}> ?p ?o.
           }
         }
     `);
@@ -326,7 +326,7 @@ export async function deleteFilter(filterUri) {
 
         DELETE WHERE {
         GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-            <${filterUri}> ?p ?o.
+            <${escapeSparqlString(filterUri)}> ?p ?o.
           }
         }
     `);
@@ -410,7 +410,7 @@ export function createFilter(filterUri, requireAll, constraints, subFilters) {
 
                 INSERT DATA {
                   GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-                    <${filterUri}> a sh:NodeShape;
+                    <${escapeSparqlString(filterUri)}> a sh:NodeShape;
                                    sh:targetClass besluit:Agendapunt;
                                    ${requireAll ? 'sh:and' : 'sh:or'} ${createListQuery(requirements)}.
                   }
@@ -438,7 +438,7 @@ async function sendSubscriptionEmail(email, token) {
           GRAPH <http://mu.semte.ch/graphs/system/email> {
             <http://lokaalbeslist.be/id/emails/${uuid()}> a nmo:Email;
                 nmo:messageFrom "lokaalbeslist@semantic.works";
-                nmo:emailTo "${email}";
+                nmo:emailTo "${escapeSparqlString(email)}";
                 nmo:messageSubject "Inschrijving notificaties LokaalBeslist.be";
                 nmo:htmlMessageContent "Beste,<br><br>U bent ingeschreven voor notificaties van LokaalBeslist.be. Als u wil uitschrijven voor deze notificaties of uw voorkeuren aanpassen kan dat via volgende link: <a href='http://lokaalbeslist.be/subscriptions?token=${token}'>http://lokaalbeslist.be/subscriptions?token=${token}</a>.<br><br>Met vriendelijke groet,<br>LokaalBeslist.be";
                 nmo:sentDate "";
@@ -466,7 +466,7 @@ export function addSubscription(filterUri, email) {
             SELECT ?user WHERE {
               GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
                 ?user a schema:Person;
-                      schema:email "${email}".
+                      schema:email "${escapeSparqlString(email)}".
               }
             }
         `).then((userURIQuery) => {
@@ -483,7 +483,7 @@ export function addSubscription(filterUri, email) {
                     INSERT {
                       GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
                         <${userURI}> a schema:Person;
-                              schema:email "${email}";
+                              schema:email "${escapeSparqlString(email)}";
                               account:password "${userPassword}".
                       }
                     } WHERE {}
@@ -498,7 +498,7 @@ export function addSubscription(filterUri, email) {
 
                 INSERT DATA {
                   GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-                    <${userURI}> ext:hasSubscription <${filterUri}>.
+                    <${userURI}> ext:hasSubscription <${escapeSparqlString(filterUri)}>.
                   }
                 }
             `).then(resolve).catch(reject);
@@ -516,7 +516,7 @@ export async function existsConstraint(uri) {
     return await querySudo(`
         PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
         ASK WHERE {
-            BIND(<${uri}> as ?constraint)
+            BIND(<${escapeSparqlString(uri)}> as ?constraint)
 
             ?constraint ext:constraintSubject ?subject;
                         ext:constraintPredicate ?predicate;
@@ -540,7 +540,7 @@ export async function existsFilter(uri) {
 
         ASK WHERE {
           GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
-            <${uri}> a sh:NodeShape;
+            <${escapeSparqlString(uri)}> a sh:NodeShape;
                      sh:targetClass besluit:Agendapunt.
           }
         }
