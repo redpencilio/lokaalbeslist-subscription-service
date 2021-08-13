@@ -502,7 +502,7 @@ export function addSubscription(filterUri, email) {
                   }
                 }
             `).then(resolve).catch(reject);
-        });
+        }).catch(reject);
     });
 }
 

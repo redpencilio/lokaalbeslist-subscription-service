@@ -29,7 +29,7 @@ app.delete('/subscription-filters/:id', async (req, res) => {
             res.status(204).send();
         }).catch((err) => {
             console.error(err);
-            error(res, err);
+            error(res, err, 500);
         });
 });
 
@@ -46,7 +46,7 @@ app.delete('/subscription-filter-constraints/:id', async (req, res) => {
             res.status(204).send();
         }).catch((err) => {
             console.error(err);
-            error(res, err);
+            error(res, err, 500);
         });
 });
 
@@ -125,8 +125,7 @@ app.patch('/subscription-filter-constraints/:id', async (req, res) => {
             attributes['subject'],
             attributes['predicate'],
             attributes['object']
-        )
-        ).then(() => {
+        )).then(() => {
             res.status(201).set('Location', constraintUri).send(JSON.stringify({
                 'data': {
                     'type': 'subscription-filter-constraints',
@@ -281,7 +280,7 @@ app.post('/subscription-filters', async (req, res) => {
         req,
         res,
         'subscription-filters',
-        ['require-all', 'email']
+        ['require-all']
     )) {
         return;
     }
@@ -298,7 +297,11 @@ app.post('/subscription-filters', async (req, res) => {
         relationships?.constraints?.data,
         subFilters?.data,
     )
-        .then(() => addSubscription(filterUri, attributes['email']))
+        .then(() => {
+            if (attributes['email']) {
+                addSubscription(filterUri, attributes['email']);
+            }
+        })
         .then(() => {
             res.status(201).set('Location', filterUri).send(JSON.stringify({
                 'data': {
