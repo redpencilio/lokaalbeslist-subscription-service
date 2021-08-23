@@ -78,7 +78,7 @@ app.patch('/subscription-filters/:id', async (req, res) => {
             filterUri,
             attributes['require-all'],
             relationships.constraints?.data,
-            subFilters
+            subFilters?.data
         )
     ).then(() => {
         res.status(201).set('Location', filterUri).send(JSON.stringify({

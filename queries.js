@@ -61,7 +61,7 @@ function mapSubject(subject) {
  * a SPARQL query (without trailing period).
  */
 function mapPredicateObject(predicate, object) {
-    //TODO: Date predicates
+    // TODO: Date predicates
     switch (predicate) {
     case 'textEquals':
     case 'governanceAreaEquals':
@@ -435,7 +435,7 @@ async function sendSubscriptionEmail(email, token) {
         PREFIX nfo: <http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#>
 
         INSERT DATA {
-          GRAPH <http://mu.semte.ch/graphs/system/email> {
+          GRAPH <http://lokaalbeslist.be/graphs/system/email> {
             <http://lokaalbeslist.be/id/emails/${uuid()}> a nmo:Email;
                 nmo:messageFrom "lokaalbeslist@semantic.works";
                 nmo:emailTo "${escapeSparqlString(email)}";
