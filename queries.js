@@ -19,6 +19,8 @@ import { verifyConstraint, verifyFilter, escapeSparqlString } from './helpers';
  * @typedef {object} SubscriptionFilter
  * @property {string} id - The id of the filter.
  * @property {string} email - The email this subscription filter is for.
+ * @property {string} frequency - The frequency, one of 'daily', 'weekly',
+ * 'monthly'
  * @property {boolean} requireAll - Require all the constraints to be met if
  * true, only one if false.
  * @property {SubscriptionFilterConstraint[]} constraints - The
@@ -191,12 +193,17 @@ export async function findConstraint(uri) {
 export async function findFilter(uri) {
     const fullFilterResults = await querySudo(`
         PREFIX sh: <http://www.w3.org/ns/shacl#>
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
 
-        SELECT ?andOr (GROUP_CONCAT(?constraint ; separator=",") as ?constraints) WHERE {
+        SELECT ?frequency ?andOr (GROUP_CONCAT(?constraint ; separator=",") as ?constraints) WHERE {
           BIND(<${escapeSparqlString(uri)}> as ?filter)
           ?filter ?andOr ?constraintList.
 
-          ?constraintList rdf:rest*/rdf:first ?constraint
+          OPTIONAL {
+            ?filter ext:subscriptionFrequency ?frequency.
+          }
+
+          ?constraintList rdf:rest*/rdf:first ?constraint.
 
           VALUES ?andOr {
             sh:and
@@ -229,6 +236,7 @@ export async function findFilter(uri) {
         'require-all': fullFilter['andOr']['value'] === 'http://www.w3.org/ns/shacl#and',
         'constraints': constraints.filter(x => !!x),
         'sub-filters': subFilters.filter(x => !!x),
+        'frequency': fullFilter['frequency']?.['value'],
     };
 }
 
@@ -454,10 +462,11 @@ async function sendSubscriptionEmail(email, token) {
  *
  * @param {string} filterUri - The URI to subscribe to.
  * @param {string} email - The email address.
+ * @param {string} frequency - One of 'daily', 'weekly', 'monthly'
  * @returns {Promise} - Resolves if the subscription was successfully added,
  * rejects if something went wrong.
  */
-export function addSubscription(filterUri, email) {
+export function addSubscription(filterUri, email, frequency) {
     // Check if the user exists and create one if it doesn't
     return new Promise((resolve, reject) => {
         querySudo(`
@@ -499,6 +508,7 @@ export function addSubscription(filterUri, email) {
                 INSERT DATA {
                   GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
                     <${userURI}> ext:hasSubscription <${escapeSparqlString(filterUri)}>.
+                    <${escapeSparqlString(filterUri)}> ext:subscriptionFrequency "${escapeSparqlString(frequency)}".
                   }
                 }
             `).then(resolve).catch(reject);
@@ -545,4 +555,20 @@ export async function existsFilter(uri) {
           }
         }
     `).then((result) => result.boolean);
+}
+
+export async function updateFrequency(filterURI, frequency) {
+    return await querySudo(`
+        PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+
+        DELETE WHERE {
+          GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+            <${escapeSparqlString(filterURI)}> ext:subscriptionFrequency ?freq.
+          }
+        } INSERT DATA {
+          GRAPH <http://lokaalbeslist.be/graphs/subscriptions> {
+            <${escapeSparqlString(filterURI)}> ext:subscriptionFrequency "${escapeSparqlString(frequency)}".
+          }
+        }
+    `);
 }

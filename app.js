@@ -10,7 +10,8 @@ import {
     deleteFilter,
     addSubscription,
     findFilter,
-    findConstraint
+    findConstraint,
+    updateFrequency
 } from './queries';
 import { validateRequest, error } from './helpers';
 
@@ -80,6 +81,11 @@ app.patch('/subscription-filters/:id', async (req, res) => {
             relationships.constraints?.data,
             subFilters?.data
         )
+    ).then(
+        () => updateFrequency(
+            filterUri,
+            attributes['frequency']
+        )
     ).then(() => {
         res.status(201).set('Location', filterUri).send(JSON.stringify({
             'data': {
@@ -87,6 +93,7 @@ app.patch('/subscription-filters/:id', async (req, res) => {
                 'id': req.params.id,
                 'attributes': {
                     'require-all': attributes['require-all'],
+                    'frequency': attributes['frequency'],
                 },
                 'relationships': {
                     'sub-filters': subFilters,
@@ -190,7 +197,8 @@ app.get('/subscription-filters/:id', async (req, res) => {
             'type': 'subscription-filters',
             'id': filter.id,
             'attributes': {
-                'require-all': filter.requireAll
+                'require-all': filter.requireAll,
+                'frequency': filter.frequency
             },
             'relationships': {
                 'constraints': {
@@ -246,7 +254,8 @@ app.get('/subscription-filters', async (req, res) => {
             'type': 'subscription-filters',
             'id': filter.id,
             'attributes': {
-                'require-all': filter['require-all']
+                'require-all': filter['require-all'],
+                'frequency': filter['frequency'],
             },
             'relationships': {
                 'constraints': {
@@ -298,8 +307,8 @@ app.post('/subscription-filters', async (req, res) => {
         subFilters?.data,
     )
         .then(() => {
-            if (attributes['email']) {
-                addSubscription(filterUri, attributes['email']);
+            if (attributes['email'] && attributes['frequency']) {
+                addSubscription(filterUri, attributes['email'], attributes['frequency']);
             }
         })
         .then(() => {
@@ -309,6 +318,7 @@ app.post('/subscription-filters', async (req, res) => {
                     'id': resourceId,
                     'attributes': {
                         'require-all': attributes['require-all'],
+                        'frequency': attributes['frequency'],
                     },
                     'relationships': {
                         'sub-filters': subFilters,
